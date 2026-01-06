@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agentic AI Travel Assistant</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-50">
+  <div id="app" class="w-full max-w-6xl mx-auto p-6"></div>
+
+  <script>
+    const states = [
+      {id: 'listening', name: 'Listening / Understanding', color: 'bg-blue-100 border-blue-300', description: 'AI gathering and interpreting user intent', userControl: 'Full control - can modify, clarify, or stop', aiAction: 'Passive listening, parsing intent', entry: 'User initiates conversation or provides new input', exit: 'Intent sufficiently clear OR ambiguity requires clarification', next: ['clarifying', 'acting'], example: 'To plan this trip, tell me your departure city and preferred dates.'},
+      {id: 'clarifying', name: 'Clarifying Intent', color: 'bg-yellow-100 border-yellow-300', description: 'Confidence signals not met - seeking clarification', userControl: 'User must respond to proceed', aiAction: 'Asking targeted questions', entry: 'Conflicting constraints OR missing critical info OR ambiguous preferences', exit: 'User provides clarification OR abandons', next: ['listening', 'acting', 'uncertainty'], example: 'One decision: nonstop vs. lowest cost. I will optimize for one—choose which.'},
+      {id: 'acting', name: 'Acting Autonomously', color: 'bg-green-100 border-green-300', description: 'AI searching/filtering on user behalf', userControl: 'Can pause, stop, or modify constraints', aiAction: 'Executing search with visible parameters', entry: 'Intent clear AND constraints sufficient AND action reversible', exit: 'Results produced OR confidence drops OR user changes constraints', next: ['uncertainty', 'confirmation', 'listening'], example: 'Searching flights SFO to SEA Jan 10-12 under $800... 48 options found. Narrowing to best value...'},
+      {id: 'uncertainty', name: 'High Uncertainty', color: 'bg-orange-100 border-orange-300', description: 'System detected conflicting signals or high ambiguity', userControl: 'Must choose path forward', aiAction: 'Surfacing uncertainty with reasoning. Automation paused—no commitment will happen until user chooses.', entry: 'Volatile inventory OR conflicting constraints OR low-quality results', exit: 'User adjusts constraints OR accepts trade-offs OR abandons', next: ['clarifying', 'acting', 'recovery'], example: 'Not confident these results match. Why: Limited availability, prices changing fast. I am pausing automation until you choose. Adjust dates or budget?'},
+      {id: 'confirmation', name: 'Awaiting Confirmation', color: 'bg-purple-100 border-purple-300', description: 'High-stakes action requires explicit approval', userControl: 'Must explicitly approve or reject', aiAction: 'Paused - awaiting confirmation', entry: 'Action crosses autonomy boundary (payment, booking, cancellation)', exit: 'User confirms OR rejects OR times out', next: ['transacting', 'listening', 'recovery'], example: 'Ready to book: Alaska $650, Hyatt $360 (2 nights). Total: $1,010. [Confirm] [Review] [Keep searching]'},
+      {id: 'transacting', name: 'Transacting', color: 'bg-indigo-100 border-indigo-300', description: 'Performing approved financial action', userControl: 'Limited - can attempt to cancel', aiAction: 'Processing transaction', entry: 'User confirmed high-stakes action', exit: 'Transaction succeeds OR fails', next: ['listening', 'recovery'], example: 'Processing payment... Confirmed! Your flight and hotel are booked. Confirmation sent to email.'},
+      {id: 'recovery', name: 'Recovery & Handoff', color: 'bg-red-100 border-red-300', description: 'Error occurred - offering recovery paths or human handoff', userControl: 'Full control restored', aiAction: 'Explaining error, offering options or human transfer', entry: 'Error detected OR edge case OR user dissatisfaction', exit: 'User selects recovery path OR connects with human agent', next: ['listening', 'clarifying'], example: 'Something went wrong. What I assumed: Cheapest mattered most. You can: [Undo] [Re-plan with priorities] [Talk to agent]'}
+    ];
+
+    const stateMap = Object.fromEntries(states.map(s => [s.id, s.name]));
+    stateMap['complete'] = 'Completed';
+
+    const getAutonomy = (key) => {
+      const k = (key || '').toLowerCase();
+      if (['clarifying', 'confirmation'].includes(k)) return 'Waiting';
+      if (k === 'acting') return 'Acting';
+      if (k === 'transacting') return 'Transacting';
+      if (k === 'recovery') return 'Recovery';
+      if (k === 'uncertainty') return 'Paused';
+      return 'Listening';
+    };
+
+    const getControls = (id) => {
+      switch (id) {
+        case 'listening': return 'Edit request | Stop';
+        case 'clarifying': return 'Answer | Edit request | Stop';
+        case 'acting': return 'Pause | Stop | Change constraints';
+        case 'uncertainty': return 'Choose option | Change constraints | Stop';
+        case 'confirmation': return 'Confirm | Review | Cancel';
+        case 'transacting': return 'Attempt cancel | View details';
+        case 'recovery': return 'Undo | Re-plan | Talk to agent';
+        default: return 'Stop';
+      }
+    };
+
+    const signals = [
+      {level: 'High Clarity', action: 'Proceed autonomously (low-risk)', signals: 'Clear intent + stable inventory + no policy constraints', see: 'Unobtrusive progress indicator', color: 'bg-green-500'},
+      {level: 'Mixed Signals', action: 'Proceed with visible assumption + override', signals: 'Minor ambiguity or mild preference conflict', see: 'Assumption statement with [Change]', color: 'bg-yellow-500'},
+      {level: 'High Uncertainty', action: 'Stop automation; present options', signals: 'Conflicting constraints, missing info, volatile inventory', see: 'Uncertainty explanation + paths forward', color: 'bg-orange-500'},
+      {level: 'High Stakes / Risk', action: 'Block; require confirmation or handoff', signals: 'Payment, cancellations, identity, fraud', see: 'Confirmation gate or agent option', color: 'bg-red-500'}
+    ];
+
+    const flow = [
+      {id: 'listening', state: 'Listening / Understanding', userInput: 'Weekend trip to Seattle under $800', systemState: 'Parsing intent: destination, timeframe, budget', goal: 'Understand traveler wants and identify gaps', context: 'New conversation, no prior context', transition: 'Intent clear but preference ambiguity detected', next: 'clarifying'},
+      {id: 'clarifying', state: 'Clarifying Intent', userInput: null, systemState: 'Do you prefer nonstop flights or lowest cost?', goal: 'Resolve ambiguity before action', context: 'Destination=SEA, Budget=$800, Dates=weekend (flexible unknown), Preference=unclear', transition: 'User responds: Lowest cost', next: 'acting'},
+      {id: 'acting', state: 'Acting Autonomously', userInput: null, systemState: 'Searching flights & hotels: SEA, weekend, $800, prioritizing cost... 48 flights, 22 hotels found', goal: 'Find options matching constraints', context: 'Destination=SEA, Budget=$800, Preference=lowest cost, Dates=weekend (flexible=false)', transition: 'Results found, inventory volatile', next: 'uncertainty'},
+      {id: 'uncertainty', state: 'High Uncertainty', userInput: null, systemState: 'Limited availability. Prices changing fast. Consider: [+1 day] [Nearby city] [Increase budget]', goal: 'Surface uncertainty, offer control', context: 'Destination=SEA, Budget=$800, Preference=lowest cost, Dates=weekend, Inventory=volatile (3 hotels sold out last hour)', transition: 'User adjusts: +1 day flexibility', next: 'acting'},
+      {id: 'acting', state: 'Acting Autonomously', userInput: null, systemState: 'Re-searching flexible dates... Alaska $180, Best Western $160/night (2 nights) = $500', goal: 'Re-execute with new constraints', context: 'Destination=SEA, Budget=$800, Preference=lowest cost, Dates=weekend+1 (flexible=true)', transition: 'Ready to book (crosses boundary)', next: 'confirmation'},
+      {id: 'confirmation', state: 'Awaiting Confirmation', userInput: null, systemState: 'Ready to book: Total $500. [Confirm] [Review] [Keep searching]', goal: 'Pause for explicit approval before payment', context: 'Alaska $180 + Best Western $320 (2 nights) = $500 total, User has not yet confirmed', transition: 'User confirms', next: 'transacting'},
+      {id: 'transacting', state: 'Transacting', userInput: null, systemState: 'Processing payment... Booking confirmed. Confirmation sent.', goal: 'Execute approved transaction', context: 'Payment processing, User confirmed at previous step', transition: 'Success', next: 'complete'}
+    ];
+
+    const autonomy = {
+      auto: ['Search flights/hotels/activities', 'Filter and sort results', 'Draft itineraries', 'Show price comparisons', 'Save favorites'],
+      confirm: ['Book flights/hotels (payment)', 'Cancel existing bookings', 'Modify reservations with fees', 'Apply loyalty points/credits', 'Change traveler details'],
+      human: ['Dispute resolution', 'Fraud investigation', 'Complex policy exceptions', 'Group booking coordination', 'Accessibility accommodations']
+    };
+
+    const trust = [
+      {label: 'Assumptions', text: 'Always visible, always editable'},
+      {label: 'Confidence', text: 'Expressed via signals (not magic scores)'},
+      {label: 'Actions', text: 'Never execute high-stakes without approval'},
+      {label: 'Undo', text: 'Provide reversible paths wherever possible'},
+      {label: 'Handoff', text: 'Fast path to human for edge cases'}
+    ];
+
+    let view = 'states', selected = null, step = 0;
+
+    function render() {
+      const curr = view === 'flow' && step < flow.length ? flow[step].state : 'Design Review Mode';
+      const auto = view === 'flow' && step < flow.length ? getAutonomy(flow[step].id) : 'Review';
+
+      document.getElementById('app').innerHTML = `
+        <div class="bg-blue-600 text-white rounded-lg shadow-lg p-4 mb-6 flex justify-between">
+          <div>
+            <p class="text-sm opacity-90">Current State</p>
+            <p class="font-bold text-lg">${curr}</p>
+          </div>
+
+          <div class="flex gap-4 text-sm">
+            <div>
+              <p class="opacity-90">Autonomy Level</p>
+              <p class="font-semibold">${auto}</p>
+            </div>
+
+            <div class="border-l border-white opacity-30 mx-2"></div>
+
+            <div>
+              <p class="opacity-90">User Control</p>
+              <p class="font-semibold">${view === 'flow' ? getControls(flow[step]?.id) : getControls('listening')}</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-6">
+          <h1 class="text-3xl font-bold mb-2">Agentic AI Travel Assistant</h1>
+          <p class="text-lg text-gray-600 mb-1">System Design: Explicit States, Confidence Signals, User Control</p>
+          <p class="text-sm text-gray-500 mb-6">Designing for mixed-initiative interactions where clarity beats magic</p>
+
+          <div class="flex gap-2 mb-6 border-b flex-wrap">
+            ${[
+              {id:'states', label:'System States'},
+              {id:'flow', label:'Control Flow'},
+              {id:'confidence', label:'Confidence Signals'},
+              {id:'autonomy', label:'Autonomy Boundaries'},
+              {id:'recovery', label:'Recovery & Handoff'}
+            ].map(tab =>
+              `<button onclick="view='${tab.id}';selected=null;${tab.id !== 'flow' ? "step=0;" : ""}render()"
+                class="px-4 py-2 font-medium ${view === tab.id ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600 hover:text-gray-900'}">
+                ${tab.label}
+              </button>`
+            ).join('')}
+          </div>
+
+          <div id="content"></div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-lg p-6">
+          <h2 class="text-xl font-bold mb-4">Design Artifacts Included</h2>
+          <div class="grid grid-cols-3 gap-4">
+            <div class="border rounded p-4">
+              <p class="font-semibold text-sm mb-1">State Diagrams</p>
+              <p class="text-xs text-gray-600">7 explicit states with entry/exit/transitions</p>
+            </div>
+            <div class="border rounded p-4">
+              <p class="font-semibold text-sm mb-1">Decision Trees</p>
+              <p class="text-xs text-gray-600">Confidence-based logic with signals</p>
+            </div>
+            <div class="border rounded p-4">
+              <p class="font-semibold text-sm mb-1">Trust Mechanisms</p>
+              <p class="text-xs text-gray-600">Autonomy contract, recovery, transparency</p>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // ✅ MUST be inside render(), AFTER the template is injected
+      renderContent();
+    } // ✅ CLOSE render() BEFORE defining renderContent()
+
+    function renderContent() {
+      const c = document.getElementById('content');
+
+      if (view === 'states') {
+        c.innerHTML = `
+          <div class="bg-blue-50 border border-blue-200 rounded p-4 mb-6">
+            <h3 class="font-semibold text-blue-900 mb-2">Design Principle</h3>
+            <p class="text-blue-800">An AI system should never make the user guess what it is doing. <b>Clarity beats polish. State awareness beats magic.</b></p>
+          </div>
+
+          <div class="bg-indigo-50 border border-indigo-200 rounded p-4 mb-6">
+            <h3 class="font-semibold text-indigo-900 mb-2">Trust Contract</h3>
+            <div class="grid md:grid-cols-2 gap-3 mt-3">
+              ${trust.map(t => `<div class="flex gap-2"><span class="font-semibold text-sm">${t.label}:</span><span class="text-sm">${t.text}</span></div>`).join('')}
+            </div>
+            <p class="text-sm text-indigo-800 mt-3 italic">These rules are consistent across devices and brands: state label, user control, and explanation are always visible.</p>
+          </div>
+
+          ${states.map(s => `
+            <div onclick="selected=selected==='${s.id}'?null:'${s.id}';renderContent()"
+              class="border-2 ${s.color} rounded p-4 cursor-pointer mb-4 ${selected === s.id ? 'ring-2 ring-blue-500' : ''}">
+              <h3 class="font-bold text-lg mb-1">${s.name}</h3>
+              <p class="text-gray-700 mb-2">${s.description}</p>
+
+              ${selected === s.id ? `
+                <div class="mt-4 space-y-3 bg-white bg-opacity-60 rounded p-3">
+                  <div><p class="text-sm font-semibold">Entry:</p><p class="text-sm text-gray-600">${s.entry}</p></div>
+                  <div><p class="text-sm font-semibold">Exit:</p><p class="text-sm text-gray-600">${s.exit}</p></div>
+                  <div><p class="text-sm font-semibold">Next States:</p><p class="text-sm text-gray-600">${s.next.map(id => stateMap[id]).join(', ')}</p></div>
+                  <div class="border-t pt-3"><p class="text-sm font-semibold">User Control:</p><p class="text-sm text-gray-600">${s.userControl}</p></div>
+                  <div><p class="text-sm font-semibold">AI Action:</p><p class="text-sm text-gray-600">${s.aiAction}</p></div>
+                  <div class="bg-gray-800 rounded p-3"><p class="text-sm font-semibold text-gray-300">Example:</p><p class="text-sm italic text-gray-100">${s.example}</p></div>
+                </div>
+              ` : ''}
+            </div>
+          `).join('')}
+
+          <div class="bg-gray-100 rounded p-4">
+            <p class="text-sm"><b>Key Design Decision:</b> Each state has explicit entry/exit, labeled transitions, visible affordances. Click any state to see full behavior model.</p>
+          </div>
+        `;
+        return;
+      }
+
+      if (view === 'flow') {
+        // Guard: keep step in range
+        if (step < 0) step = 0;
+        if (step > flow.length - 1) step = flow.length - 1;
+
+        const f = flow[step];
+        c.innerHTML = `
+          <div class="bg-green-50 border border-green-200 rounded p-4 mb-6">
+            <h3 class="font-semibold text-green-900 mb-2">End-to-End: Weekend Trip Booking</h3>
+            <p class="text-green-800">Shows state transitions in real booking flow with uncertainty handling and autonomy boundaries.</p>
+          </div>
+
+          <div class="mb-6">
+            <div class="flex justify-between mb-2">
+              <p class="text-sm font-semibold">Step ${step + 1} of ${flow.length}</p>
+              <div class="flex gap-2">
+                <button onclick="step=Math.max(0,step-1);render()"
+                  ${step === 0 ? 'disabled' : ''}
+                  class="px-3 py-1 text-sm border rounded disabled:opacity-30">Previous</button>
+
+                <button onclick="step=Math.min(${flow.length - 1},step+1);render()"
+                  ${step === flow.length - 1 ? 'disabled' : ''}
+                  class="px-3 py-1 text-sm bg-blue-600 text-white rounded disabled:opacity-30">Next</button>
+              </div>
+            </div>
+
+            <div class="bg-white border-2 border-blue-300 rounded p-6">
+              <div class="flex items-center gap-3 mb-4">
+                <div class="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center font-bold">${step + 1}</div>
+                <h3 class="text-xl font-bold">${f.state}</h3>
+              </div>
+
+              ${f.userInput ? `
+                <div class="mb-4 bg-gray-100 rounded p-3">
+                  <p class="text-sm font-semibold mb-1">User Input:</p>
+                  <p>${f.userInput}</p>
+                </div>` : ''}
+
+              <div class="mb-4 bg-purple-50 rounded p-3">
+                <p class="text-sm font-semibold text-purple-900 mb-1">AI Goal:</p>
+                <p class="text-purple-800">${f.goal}</p>
+              </div>
+
+              <div class="mb-4 bg-slate-50 rounded p-3">
+                <p class="text-sm font-semibold text-slate-900 mb-1">Context in Scope:</p>
+                <p class="text-sm text-slate-700">${f.context || '—'}</p>
+              </div>
+
+              <div class="mb-4 bg-blue-50 rounded p-3">
+                <p class="text-sm font-semibold text-blue-900 mb-1">System State:</p>
+                <p class="text-blue-800">${f.systemState}</p>
+              </div>
+
+              <div class="mb-4 bg-yellow-50 rounded p-3">
+                <p class="text-sm font-semibold text-yellow-900 mb-1">Transition:</p>
+                <p class="text-yellow-800">${f.transition}</p>
+              </div>
+
+              ${
+                step < flow.length - 1
+                  ? `<p class="text-green-700 font-semibold">→ Next: ${stateMap[f.next] || f.next || 'Complete'}</p>`
+                  : `<div class="bg-emerald-50 rounded p-3">
+                      <p class="text-sm font-semibold text-emerald-900 mb-1">Outcome:</p>
+                      <p class="text-sm text-emerald-800">Trip booked + confirmation delivered + itinerary saved</p>
+                    </div>`
+              }
+            </div>
+          </div>
+
+          <div class="bg-gray-100 rounded p-4">
+            <p class="text-sm"><b>Key Insight:</b> System surfaces uncertainty (Step 4), returns control, crosses autonomy boundaries only after confirmation. "AI Goal" clarifies intent at each step.</p>
+          </div>
+        `;
+        return;
+      }
+
+      if (view === 'confidence') {
+        c.innerHTML = `
+          <div class="bg-purple-50 border border-purple-200 rounded p-4 mb-6">
+            <h3 class="font-semibold text-purple-900 mb-2">Confidence Signals, Not Percentages</h3>
+            <p class="text-purple-800">System uses qualitative signals to determine autonomy. These are interpretable, not magical calibrated probabilities.</p>
+          </div>
+
+          ${signals.map(s => `
+            <div class="border-2 rounded p-4 bg-white mb-4">
+              <div class="flex justify-between mb-3">
+                <h3 class="font-bold text-lg">${s.level}</h3>
+                <div class="w-24 h-2 rounded-full ${s.color}"></div>
+              </div>
+              <div class="space-y-3">
+                <div><p class="text-sm font-semibold mb-1">System Does:</p><p class="text-sm text-gray-600">${s.action}</p></div>
+                <div><p class="text-sm font-semibold mb-1">Signals:</p><p class="text-sm text-gray-600">${s.signals}</p></div>
+                <div><p class="text-sm font-semibold mb-1">User Sees:</p><p class="text-sm text-gray-600">${s.see}</p></div>
+              </div>
+            </div>
+          `).join('')}
+
+          <div class="bg-gray-100 rounded p-4">
+            <p class="text-sm"><b>Business Impact:</b> Signal-based thresholds prevent costly errors (abandoned bookings, cancellations, support calls) while maintaining trust. Directly impacts conversion and customer lifetime value.</p>
+          </div>
+        `;
+        return;
+      }
+
+      if (view === 'autonomy') {
+        c.innerHTML = `
+          <div class="bg-indigo-50 border border-indigo-200 rounded p-4 mb-6">
+            <h3 class="font-semibold text-indigo-900 mb-2">Autonomy Contract: What AI Can/Cannot Do</h3>
+            <p class="text-indigo-800">Clear boundaries prevent anxiety and errors. Users know what system will do without asking vs. what requires approval.</p>
+          </div>
+
+          <div class="border-2 border-green-300 bg-green-50 rounded p-4 mb-4">
+            <h3 class="font-bold text-lg text-green-900 mb-3">✓ Safe to Do Autonomously</h3>
+            <ul class="space-y-2">${autonomy.auto.map(i => `<li class="text-sm text-green-800">• ${i}</li>`).join('')}</ul>
+            <p class="text-xs text-green-700 mt-3 italic">Low-risk, reversible actions. User maintains control through visible constraints and stop/change buttons.</p>
+          </div>
+
+          <div class="border-2 border-yellow-300 bg-yellow-50 rounded p-4 mb-4">
+            <h3 class="font-bold text-lg text-yellow-900 mb-3">⚠ Requires Confirmation</h3>
+            <ul class="space-y-2">${autonomy.confirm.map(i => `<li class="text-sm text-yellow-800">• ${i}</li>`).join('')}</ul>
+            <p class="text-xs text-yellow-700 mt-3 italic">High-stakes actions. System pauses and presents full context before user commits.</p>
+          </div>
+
+          <div class="border-2 border-red-300 bg-red-50 rounded p-4 mb-4">
+            <h3 class="font-bold text-lg text-red-900 mb-3">👤 Requires Human Agent</h3>
+            <ul class="space-y-2">${autonomy.human.map(i => `<li class="text-sm text-red-800">• ${i}</li>`).join('')}</ul>
+            <p class="text-xs text-red-700 mt-3 italic">Edge cases, policy exceptions requiring human judgment. System facilitates handoff with context.</p>
+          </div>
+
+          <div class="bg-gray-100 rounded p-4">
+            <p class="text-sm"><b>Why This Matters:</b> Clear boundaries reduce anxiety about AI doing something wrong with money/plans. Increases willingness to use AI-assisted booking, directly impacting automation adoption and operational efficiency.</p>
+          </div>
+        `;
+        return;
+      }
+
+      if (view === 'recovery') {
+        c.innerHTML = `
+          <div class="bg-red-50 border border-red-200 rounded p-4 mb-6">
+            <h3 class="font-semibold text-red-900 mb-2">Graceful Failure = Trust & Business Impact</h3>
+            <p class="text-red-800">Travel involves money, time, stress. How system handles mistakes determines user trust and purchase completion.</p>
+          </div>
+
+          <div class="bg-white border-2 rounded p-6 mb-4">
+            <h3 class="font-bold text-xl mb-4">End-to-End Recovery Flow</h3>
+            <div class="space-y-4">
+              <div class="flex gap-3">
+                <div class="bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold flex-shrink-0">1</div>
+                <div>
+                  <p class="font-semibold mb-1">Trigger: Unclear Preference</p>
+                  <p class="text-sm text-gray-700">AI was about to book a long layover to save $40, but comfort preference was unclear. System paused before commitment.</p>
+                </div>
+              </div>
+
+              <div class="flex gap-3">
+                <div class="bg-orange-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold flex-shrink-0">2</div>
+                <div>
+                  <p class="font-semibold mb-1">System Message (Transparent Reasoning)</p>
+                  <div class="bg-gray-800 text-gray-100 rounded p-3 text-sm mt-2">
+                    I'm pausing before booking. What I assumed: Cheapest option mattered most. Layovers were acceptable to save money. I see this may not match your preference. <b>No booking has been made yet.</b>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex gap-3">
+                <div class="bg-yellow-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold flex-shrink-0">3</div>
+                <div>
+                  <p class="font-semibold mb-1">User Choices (Control Restoration)</p>
+                  <p class="text-sm text-gray-700">[Cancel this search] [Re-plan with comfort priority] [Talk to a human agent]</p>
+                </div>
+              </div>
+
+              <div class="flex gap-3">
+                <div class="bg-green-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold flex-shrink-0">4</div>
+                <div>
+                  <p class="font-semibold mb-1">Result & Handoff Mechanics</p>
+                  <p class="text-sm text-gray-700">
+                    User selects Re-plan → Returns to Clarifying with learned context (comfort &gt; cost).
+                    If user selects Talk to agent → system sends concise case summary (goal: Seattle weekend under $800, constraints: comfort unclear, actions taken: found $500 option with layover, failure reason: user preference mismatch) to reduce repetition.
+                    <b>Trust mechanism:</b> Transparent reasoning + control restoration + context preservation.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-gray-100 rounded p-4">
+            <p class="text-sm"><b>Business Impact:</b> Recovery patterns that restore control convert abandoned bookings into completions. Directly impacts conversion, customer lifetime value, and reduces support costs.</p>
+          </div>
+        `;
+        return;
+      }
+
+      // Fallback
+      c.innerHTML = `<div class="bg-gray-100 rounded p-4"><p class="text-sm">Select a tab to view content.</p></div>`;
+    }
+
+    render();
+  </script>
+</body>
+</html>
