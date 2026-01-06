@@ -34,8 +34,7 @@ Many AI interfaces feel “magical” but leave users uncertain:
 
 For example: an AI might optimize for **“cheapest option”** when the user actually wanted comfort, leading to a long layover booking the user never wanted.
 
-This project explores a different approach:  
-**state-aware UX where clarity beats magic and control is always visible.**
+This project explores a different approach, using state-aware UX where system behavior is explicit and user control is always visible.
 
 ---
 
