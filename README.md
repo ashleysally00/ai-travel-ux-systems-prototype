@@ -7,7 +7,7 @@ https://ashleysally00.github.io/ai-travel-ux-systems-prototype/
 
 ## Overview
 
-This is a **working UX systems prototype** that explores how agentic AI can support travel planning and booking **without sacrificing clarity, trust, or user control**.
+This is a working UX systems prototype that explores how agentic AI can support travel planning and booking **without sacrificing clarity, trust, or user control**.
 
 Rather than focusing on visual polish, this project models:
 - Explicit system states
