@@ -58,6 +58,13 @@ This project explores a different approach:
 
 ---
 
+## State-Based System Design
+
+This prototype uses **state-machine thinking** to model AI behavior.  
+Each system state has explicit entry conditions, exit criteria, allowed actions, and transitions, so the AI behaves predictably within defined boundaries and does not feel opaque to the user.
+
+---
+
 ## What This Prototype Demonstrates
 
 ### 1. Explicit System States
